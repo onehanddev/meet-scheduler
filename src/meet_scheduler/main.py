@@ -6,6 +6,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session, sessionmaker
 
 from meet_scheduler.availability.router import create_availability_router
+from meet_scheduler.bookings.router import create_bookings_router
 from meet_scheduler.bookings.service import BookingError
 from meet_scheduler.config import Settings, get_settings
 from meet_scheduler.database import create_session_factory, session_scope
@@ -91,6 +92,7 @@ def create_app(
     app.include_router(create_profile_router(get_session, resolve_settings))
     app.include_router(create_meeting_type_router(get_session, resolve_settings))
     app.include_router(create_availability_router(get_session, resolve_settings))
+    app.include_router(create_bookings_router(get_session, resolve_settings))
     app.include_router(create_public_router(get_session, resolve_settings))
 
     @app.get("/healthz", tags=["health"])
