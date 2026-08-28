@@ -15,7 +15,9 @@ class Host(Base):
     password_hash: Mapped[str] = mapped_column(Text)
     username: Mapped[str | None] = mapped_column(String(30), nullable=True)
     display_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
-    timezone: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    timezone: Mapped[str | None] = mapped_column(
+        String(64), nullable=True, default="Asia/Kolkata", server_default="Asia/Kolkata"
+    )
 
     __table_args__ = (
         Index(

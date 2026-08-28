@@ -179,9 +179,11 @@ def test_booking_rejects_a_slot_that_is_not_currently_generated(
 
 
 def test_booking_rejects_when_host_timezone_not_set(
-    client: TestClient,
+    client: TestClient, session_factory: sessionmaker[Session]
 ) -> None:
-    # Host without timezone — booking should explain why, not generic 404
+    # Host without timezone — booking should explain why, not generic 404.
+    # Default is Asia/Kolkata, so we must explicitly clear it to simulate
+    # a legacy host that never set timezone.
     password = "correct horse battery staple"
     assert (
         client.post(
@@ -195,7 +197,6 @@ def test_booking_rejects_when_host_timezone_not_set(
     )
     token = login.json()["access_token"]
     headers = {"Authorization": f"Bearer {token}"}
-    # set username but NOT timezone
     assert (
         client.put(
             "/me",
@@ -225,6 +226,12 @@ def test_booking_rejects_when_host_timezone_not_set(
         ).status_code
         == 200
     )
+    # Clear timezone to simulate legacy/unconfigured host
+    with session_factory() as s:
+        host = s.scalar(select(Host).where(Host.username == "notzhost"))
+        assert host is not None
+        host.timezone = None
+        s.commit()
     request_time = datetime(2026, 8, 30, 8, 0, tzinfo=UTC)
     with patch("meet_scheduler.slots.service.get_now", return_value=request_time):
         resp = client.post(

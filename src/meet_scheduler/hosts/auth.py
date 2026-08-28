@@ -115,6 +115,7 @@ def create_auth_router(
         host = Host(
             email=request.email.strip().lower(),
             password_hash=password_hasher.hash(request.password),
+            timezone="Asia/Kolkata",
         )
         session.add(host)
         try:
