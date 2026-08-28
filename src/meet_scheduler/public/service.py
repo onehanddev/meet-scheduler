@@ -13,7 +13,10 @@ def resolve_host_and_meeting(
         select(Host).where(func.lower(Host.username) == username.lower())
     )
     if host is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "public_resource_not_found", "message": "Not found."},
+        )
     mt = session.scalar(
         select(MeetingType).where(
             MeetingType.host_id == host.id,
@@ -21,5 +24,8 @@ def resolve_host_and_meeting(
         )
     )
     if mt is None or not mt.active:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "public_resource_not_found", "message": "Not found."},
+        )
     return host, mt

@@ -26,6 +26,8 @@ def create_booking(
     host: Host,
     meeting_type: MeetingType,
     *,
+    username: str,
+    event_slug: str,
     invitee_name: str,
     invitee_email: str,
     slot_start: datetime,
@@ -33,6 +35,13 @@ def create_booking(
 ) -> tuple[Booking, str]:
     host = lock_host(session, host.id, read_only=True)
     session.refresh(meeting_type)
+    if (
+        host.username is None
+        or host.username.casefold() != username.casefold()
+        or meeting_type.event_slug.casefold() != event_slug.casefold()
+        or not meeting_type.active
+    ):
+        raise BookingError("public_resource_not_found", "Not found.", 404)
     slot_start = slot_start.astimezone(UTC)
     now = slots_service.get_now()
     if host.timezone is None:

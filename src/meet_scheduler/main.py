@@ -1,6 +1,6 @@
 from collections.abc import Iterator
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session, sessionmaker
@@ -29,6 +29,28 @@ def create_app(
         return JSONResponse(
             status_code=exc.status_code,
             content={"code": exc.code, "message": exc.message, "details": []},
+        )
+
+    @app.exception_handler(HTTPException)
+    async def handle_http_error(
+        request: Request, exc: HTTPException  # noqa: ARG001
+    ) -> JSONResponse:
+        if isinstance(exc.detail, dict):
+            code = str(exc.detail.get("code", "request_error"))
+            message = str(exc.detail.get("message", "The request failed."))
+        else:
+            code = {
+                401: "unauthenticated",
+                403: "unauthorized",
+                404: "not_found",
+                409: "conflict",
+                422: "validation_error",
+            }.get(exc.status_code, "request_error")
+            message = str(exc.detail)
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={"code": code, "message": message, "details": []},
+            headers=exc.headers,
         )
 
     @app.exception_handler(RequestValidationError)

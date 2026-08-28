@@ -127,6 +127,8 @@ def create_public_router(
             session,
             host,
             meeting_type,
+            username=username,
+            event_slug=event_slug,
             invitee_name=request.invitee_name,
             invitee_email=str(request.invitee_email),
             slot_start=request.slot_start,

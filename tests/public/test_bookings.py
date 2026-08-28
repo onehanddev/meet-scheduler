@@ -63,7 +63,25 @@ def test_booking_validates_the_public_request_contract(
     assert response.json()["details"]
 
 
-def _setup_bookable_host(client: TestClient) -> None:
+def test_booking_missing_public_resource_has_stable_error(client: TestClient) -> None:
+    response = client.post(
+        "/missing/30min/bookings",
+        json={
+            "invitee_name": "Bob",
+            "invitee_email": "bob@example.com",
+            "slot_start": "2026-08-31T09:00:00Z",
+        },
+    )
+
+    assert response.status_code == 404
+    assert response.json() == {
+        "code": "public_resource_not_found",
+        "message": "Not found.",
+        "details": [],
+    }
+
+
+def _setup_bookable_host(client: TestClient) -> dict[str, str]:
     password = "correct horse battery staple"
     assert client.post(
         "/auth/register",
@@ -94,6 +112,7 @@ def _setup_bookable_host(client: TestClient) -> None:
         headers=headers,
         json={"windows": [{"weekday": 0, "start": "09:00", "end": "10:00"}]},
     ).status_code == 200
+    return headers
 
 
 def test_invitee_books_an_exact_generated_slot(
@@ -157,6 +176,55 @@ def test_booking_rejects_a_slot_that_is_not_currently_generated(
     }
     with session_factory() as session:
         assert session.scalar(select(Booking)) is None
+
+
+def test_booking_revalidates_current_availability(client: TestClient) -> None:
+    headers = _setup_bookable_host(client)
+    assert client.put(
+        "/availability",
+        headers=headers,
+        json={"windows": [{"weekday": 0, "start": "10:00", "end": "11:00"}]},
+    ).status_code == 200
+    request_time = datetime(2026, 8, 30, 8, 0, tzinfo=UTC)
+
+    with patch("meet_scheduler.slots.service.get_now", return_value=request_time):
+        response = client.post(
+            "/alice/30min/bookings",
+            json={
+                "invitee_name": "Bob Invitee",
+                "invitee_email": "bob@example.com",
+                "slot_start": "2026-08-31T09:00:00Z",
+            },
+        )
+
+    assert response.status_code == 409
+    assert response.json()["code"] == "slot_no_longer_available"
+
+
+@pytest.mark.parametrize(
+    "request_time",
+    [
+        datetime(2026, 8, 31, 8, 0, 1, tzinfo=UTC),
+        datetime(2026, 7, 1, 9, 0, tzinfo=UTC),
+    ],
+)
+def test_booking_revalidates_notice_and_horizon(
+    client: TestClient, request_time: datetime
+) -> None:
+    _setup_bookable_host(client)
+
+    with patch("meet_scheduler.slots.service.get_now", return_value=request_time):
+        response = client.post(
+            "/alice/30min/bookings",
+            json={
+                "invitee_name": "Bob Invitee",
+                "invitee_email": "bob@example.com",
+                "slot_start": "2026-08-31T09:00:00Z",
+            },
+        )
+
+    assert response.status_code == 409
+    assert response.json()["code"] == "slot_no_longer_available"
 
 
 def test_concurrent_attempts_create_exactly_one_confirmed_booking(
@@ -259,6 +327,8 @@ def test_database_overlap_is_mapped_to_private_conflict_response(
     slot_end = datetime(2026, 8, 31, 9, 30, tzinfo=UTC)
 
     with session_factory() as winner_session:
+        winner_pid = winner_session.scalar(text("SELECT pg_backend_pid()"))
+        assert winner_pid is not None
         host_id = winner_session.scalar(
             select(Host.id).where(Host.username == "alice")
         )
@@ -303,14 +373,13 @@ def test_database_overlap_is_mapped_to_private_conflict_response(
                             text(
                                 """
                                 SELECT EXISTS (
-                                    SELECT 1
-                                    FROM pg_stat_activity
+                                    SELECT 1 FROM pg_stat_activity
                                     WHERE datname = current_database()
-                                      AND pid != pg_backend_pid()
-                                      AND wait_event_type = 'Lock'
+                                      AND :blocker_pid = ANY(pg_blocking_pids(pid))
                                 )
                                 """
-                            )
+                            ),
+                            {"blocker_pid": winner_pid},
                         )
                     )
                     if loser_is_waiting:
@@ -329,3 +398,68 @@ def test_database_overlap_is_mapped_to_private_conflict_response(
     assert "winner" not in response.text.lower()
     assert "winner@example.com" not in response.text.lower()
     assert str(host_id) not in response.text
+
+
+def test_booking_rechecks_deactivation_after_waiting_for_configuration(
+    client: TestClient, session_factory: sessionmaker[Session]
+) -> None:
+    _setup_bookable_host(client)
+    request_time = datetime(2026, 8, 30, 8, 0, tzinfo=UTC)
+
+    with session_factory() as configuration_session:
+        configuration_pid = configuration_session.scalar(
+            text("SELECT pg_backend_pid()")
+        )
+        assert configuration_pid is not None
+        meeting_type = configuration_session.scalar(select(MeetingType))
+        assert meeting_type is not None
+        configuration_session.scalar(
+            select(Host).where(Host.id == meeting_type.host_id).with_for_update()
+        )
+        meeting_type.active = False
+        configuration_session.flush()
+
+        with (
+            patch("meet_scheduler.slots.service.get_now", return_value=request_time),
+            ThreadPoolExecutor(max_workers=1) as executor,
+        ):
+            future = executor.submit(
+                client.post,
+                "/alice/30min/bookings",
+                json={
+                    "invitee_name": "Bob Invitee",
+                    "invitee_email": "bob@example.com",
+                    "slot_start": "2026-08-31T09:00:00Z",
+                },
+            )
+            deadline = monotonic() + 5
+            booking_is_waiting = False
+            with session_factory() as observer:
+                while monotonic() < deadline:
+                    booking_is_waiting = bool(
+                        observer.scalar(
+                            text(
+                                """
+                                SELECT EXISTS (
+                                    SELECT 1 FROM pg_stat_activity
+                                    WHERE datname = current_database()
+                                      AND :blocker_pid = ANY(pg_blocking_pids(pid))
+                                )
+                                """
+                            ),
+                            {"blocker_pid": configuration_pid},
+                        )
+                    )
+                    if booking_is_waiting:
+                        break
+                    sleep(0.01)
+            configuration_session.commit()
+            response = future.result()
+
+    assert booking_is_waiting
+    assert response.status_code == 404
+    assert response.json() == {
+        "code": "public_resource_not_found",
+        "message": "Not found.",
+        "details": [],
+    }
