@@ -75,8 +75,8 @@ def test_booking_missing_public_resource_has_stable_error(client: TestClient) ->
 
     assert response.status_code == 404
     assert response.json() == {
-        "code": "public_resource_not_found",
-        "message": "Not found.",
+        "code": "host_not_found",
+        "message": "Host 'missing' not found.",
         "details": [],
     }
 
@@ -176,6 +176,68 @@ def test_booking_rejects_a_slot_that_is_not_currently_generated(
     }
     with session_factory() as session:
         assert session.scalar(select(Booking)) is None
+
+
+def test_booking_rejects_when_host_timezone_not_set(
+    client: TestClient,
+) -> None:
+    # Host without timezone — booking should explain why, not generic 404
+    password = "correct horse battery staple"
+    assert (
+        client.post(
+            "/auth/register",
+            json={"email": "notz@example.com", "password": password},
+        ).status_code
+        == 201
+    )
+    login = client.post(
+        "/auth/login", json={"email": "notz@example.com", "password": password}
+    )
+    token = login.json()["access_token"]
+    headers = {"Authorization": f"Bearer {token}"}
+    # set username but NOT timezone
+    assert (
+        client.put(
+            "/me",
+            headers=headers,
+            json={"username": "notzhost", "display_name": "No TZ"},
+        ).status_code
+        == 200
+    )
+    assert (
+        client.post(
+            "/meeting-types",
+            headers=headers,
+            json={
+                "title": "Thirty minutes",
+                "event_slug": "30min",
+                "duration": 30,
+                "active": True,
+            },
+        ).status_code
+        == 201
+    )
+    assert (
+        client.put(
+            "/availability",
+            headers=headers,
+            json={"windows": [{"weekday": 0, "start": "09:00", "end": "10:00"}]},
+        ).status_code
+        == 200
+    )
+    request_time = datetime(2026, 8, 30, 8, 0, tzinfo=UTC)
+    with patch("meet_scheduler.slots.service.get_now", return_value=request_time):
+        resp = client.post(
+            "/notzhost/30min/bookings",
+            json={
+                "invitee_name": "Bob",
+                "invitee_email": "bob@example.com",
+                "slot_start": "2026-08-31T09:00:00Z",
+            },
+        )
+    assert resp.status_code == 422
+    assert resp.json()["code"] == "host_timezone_not_set"
+    assert "timezone" in resp.json()["message"].lower()
 
 
 def test_booking_revalidates_current_availability(client: TestClient) -> None:
@@ -459,7 +521,7 @@ def test_booking_rechecks_deactivation_after_waiting_for_configuration(
     assert booking_is_waiting
     assert response.status_code == 404
     assert response.json() == {
-        "code": "public_resource_not_found",
-        "message": "Not found.",
+        "code": "meeting_type_inactive",
+        "message": "This meeting type is deactivated. Host must reactivate it.",
         "details": [],
     }

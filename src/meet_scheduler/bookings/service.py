@@ -48,17 +48,32 @@ def create_booking(
     if locked_mt is None:
         raise BookingError("public_resource_not_found", "Not found.", 404)
     meeting_type = locked_mt
-    if (
-        host.username is None
-        or host.username.casefold() != username.casefold()
-        or meeting_type.event_slug.casefold() != event_slug.casefold()
-        or not meeting_type.active
-    ):
-        raise BookingError("public_resource_not_found", "Not found.", 404)
+    # Distinct errors so invitee/host can tell *why* it 404s — not just "Not found."
+    if host.username is None or host.username.casefold() != username.casefold():
+        raise BookingError(
+            "host_not_found", f"Host '{username}' not found.", 404
+        )
+    if meeting_type.event_slug.casefold() != event_slug.casefold():
+        raise BookingError(
+            "meeting_type_not_found",
+            f"Meeting type '{event_slug}' not found for host '{username}'.",
+            404,
+        )
+    if not meeting_type.active:
+        raise BookingError(
+            "meeting_type_inactive",
+            "This meeting type is deactivated. Host must reactivate it.",
+            404,
+        )
     slot_start = slot_start.astimezone(UTC)
     now = slots_service.get_now()
     if host.timezone is None:
-        raise BookingError("public_resource_not_found", "Not found.", 404)
+        raise BookingError(
+            "host_timezone_not_set",
+            "Host has not set timezone — bookings disabled until "
+            "host sets timezone via PUT /me {\"timezone\": \"Asia/Kolkata\"}.",
+            422,
+        )
     host_date = slot_start.astimezone(ZoneInfo(host.timezone)).date()
     slots = slots_service.generate_host_slots(
         session=session,

@@ -15,7 +15,10 @@ def resolve_host_and_meeting(
     if host is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail={"code": "public_resource_not_found", "message": "Not found."},
+            detail={
+                "code": "host_not_found",
+                "message": f"Host '{username}' not found.",
+            },
         )
     mt = session.scalar(
         select(MeetingType).where(
@@ -23,9 +26,21 @@ def resolve_host_and_meeting(
             func.lower(MeetingType.event_slug) == event_slug.lower(),
         )
     )
-    if mt is None or not mt.active:
+    if mt is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail={"code": "public_resource_not_found", "message": "Not found."},
+            detail={
+                "code": "meeting_type_not_found",
+                "message": f"Meeting type '{event_slug}' not found for "
+                f"host '{username}'.",
+            },
+        )
+    if not mt.active:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "code": "meeting_type_inactive",
+                "message": "Meeting type is deactivated and not accepting bookings.",
+            },
         )
     return host, mt
