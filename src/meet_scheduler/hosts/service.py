@@ -55,10 +55,19 @@ def validate_timezone(value: str) -> str:
 
 
 def lock_host(session: Session, host_id: UUID, *, read_only: bool = False) -> Host:
-    lock_options = {"read": True, "key_share": True} if read_only else {}
+    # Booking path uses FOR KEY SHARE so concurrent bookings don't block
+    # each other but still block FOR UPDATE writers (availability/profile/mt).
+    # Config writers use plain FOR UPDATE (default).
+    if read_only:
+        return session.scalars(
+            select(Host)
+            .where(Host.id == host_id)
+            .with_for_update(key_share=True)
+            .execution_options(populate_existing=True)
+        ).one()
     return session.scalars(
         select(Host)
         .where(Host.id == host_id)
-        .with_for_update(**lock_options)
+        .with_for_update()
         .execution_options(populate_existing=True)
     ).one()

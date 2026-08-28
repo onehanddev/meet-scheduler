@@ -34,7 +34,20 @@ def create_booking(
     notes: str | None,
 ) -> tuple[Booking, str]:
     host = lock_host(session, host.id, read_only=True)
-    session.refresh(meeting_type)
+    # Lock meeting_type row with FOR SHARE so concurrent bookings can share
+    # the lock but a concurrent DELETE/deactivate (which takes FOR UPDATE
+    # via host lock + mt update) will block. Also handles deleted row.
+    from sqlalchemy import select as sa_select
+
+    locked_mt = session.scalars(
+        sa_select(MeetingType)
+        .where(MeetingType.id == meeting_type.id)
+        .with_for_update(read=True)
+        .execution_options(populate_existing=True)
+    ).one_or_none()
+    if locked_mt is None:
+        raise BookingError("public_resource_not_found", "Not found.", 404)
+    meeting_type = locked_mt
     if (
         host.username is None
         or host.username.casefold() != username.casefold()

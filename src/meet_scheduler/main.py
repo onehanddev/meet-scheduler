@@ -31,6 +31,10 @@ def create_app(
             content={"code": exc.code, "message": exc.message, "details": []},
         )
 
+    # PRD 171-172 requires a consistent {code, message, details} envelope.
+    # Intentionally global: auth/profile/meeting-type errors were migrated
+    # to this envelope (see tests/auth/test_*.py). BookingError is separate
+    # so booking-specific codes (slot_no_longer_available etc.) keep 409.
     @app.exception_handler(HTTPException)
     async def handle_http_error(
         request: Request, exc: HTTPException  # noqa: ARG001
