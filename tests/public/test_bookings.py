@@ -8,12 +8,12 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from hashlib import sha256
 from threading import Barrier
-from time import sleep
+from time import monotonic, sleep
 from unittest.mock import patch
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -59,6 +59,8 @@ def test_booking_validates_the_public_request_contract(
     response = client.post("/alice/30min/bookings", json=payload)
 
     assert response.status_code == 422
+    assert response.json()["code"] == "validation_error"
+    assert response.json()["details"]
 
 
 def _setup_bookable_host(client: TestClient) -> None:
@@ -148,9 +150,10 @@ def test_booking_rejects_a_slot_that_is_not_currently_generated(
         )
 
     assert response.status_code == 409
-    assert response.json()["detail"] == {
+    assert response.json() == {
         "code": "slot_no_longer_available",
         "message": "The selected slot is no longer available.",
+        "details": [],
     }
     with session_factory() as session:
         assert session.scalar(select(Booking)) is None
@@ -161,8 +164,10 @@ def test_concurrent_attempts_create_exactly_one_confirmed_booking(
 ) -> None:
     _setup_bookable_host(client)
     request_time = datetime(2026, 8, 30, 8, 0, tzinfo=UTC)
+    requests_ready = Barrier(8)
 
     def book(index: int) -> tuple[int, dict]:
+        requests_ready.wait()
         response = client.post(
             "/alice/30min/bookings",
             json={
@@ -184,11 +189,14 @@ def test_concurrent_attempts_create_exactly_one_confirmed_booking(
     assert statuses.count(409) == 7, results
     for response_status, body in results:
         if response_status == 409:
-            assert body["detail"]["code"] in {
+            assert body["code"] in {
                 "slot_no_longer_available",
                 "booking_conflict",
             }
-            assert "invitee" not in str(body).lower()
+            serialized = str(body).lower()
+            assert "invitee" not in serialized
+            assert "@example.com" not in serialized
+            assert "host_id" not in serialized
 
     with session_factory() as session:
         bookings = session.scalars(
@@ -286,15 +294,38 @@ def test_database_overlap_is_mapped_to_private_conflict_response(
                     "slot_start": "2026-08-31T09:00:00Z",
                 },
             )
-            sleep(0.2)
+            deadline = monotonic() + 5
+            loser_is_waiting = False
+            with session_factory() as observer:
+                while monotonic() < deadline:
+                    loser_is_waiting = bool(
+                        observer.scalar(
+                            text(
+                                """
+                                SELECT EXISTS (
+                                    SELECT 1
+                                    FROM pg_stat_activity
+                                    WHERE datname = current_database()
+                                      AND pid != pg_backend_pid()
+                                      AND wait_event_type = 'Lock'
+                                )
+                                """
+                            )
+                        )
+                    )
+                    if loser_is_waiting:
+                        break
+                    sleep(0.01)
             winner_session.commit()
             response = future.result()
 
+    assert loser_is_waiting, "losing booking never reached database contention"
     assert response.status_code == 409
     assert response.json() == {
-        "detail": {
-            "code": "booking_conflict",
-            "message": "The selected slot is no longer available.",
-        }
+        "code": "booking_conflict",
+        "message": "The selected slot is no longer available.",
+        "details": [],
     }
     assert "winner" not in response.text.lower()
+    assert "winner@example.com" not in response.text.lower()
+    assert str(host_id) not in response.text

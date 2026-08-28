@@ -41,6 +41,13 @@ class BookingCreateRequest(BaseModel):
             raise ValueError("invitee_name cannot be blank")
         return stripped
 
+    @field_validator("slot_start")
+    @classmethod
+    def validate_slot_start(cls, value: datetime) -> datetime:
+        if value.tzinfo is None:
+            raise ValueError("slot_start must include a timezone")
+        return value
+
 
 class BookingCreateResponse(BaseModel):
     id: UUID

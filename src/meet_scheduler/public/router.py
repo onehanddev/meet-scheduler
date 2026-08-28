@@ -14,7 +14,6 @@ from zoneinfo import ZoneInfo
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
-from meet_scheduler.availability.provider import WeeklyAvailabilityProvider
 from meet_scheduler.bookings.service import create_booking
 from meet_scheduler.config import Settings
 from meet_scheduler.public.schemas import (
@@ -84,27 +83,15 @@ def create_public_router(
         except Exception:
             return SlotsResponse(slots=[], timezone=timezone)
 
-        # Provider boundary — not direct DB query throughout slot code
-        provider = WeeklyAvailabilityProvider(session)
-        windows = provider.get_windows(host.id)
-
-        if not windows:
-            return SlotsResponse(slots=[], timezone=timezone)
-
         now = slots_service.get_now()
-        bookings = slots_service.fetch_confirmed_bookings(session, host.id)
-
-        slots = slots_service.generate_slots(
-            windows=windows,
-            host_timezone=host.timezone,
-            duration=mt.duration,
+        slots = slots_service.generate_host_slots(
+            session=session,
+            host=host,
+            meeting_type=mt,
             from_date=from_date,
             to_date=to_date,
             invitee_timezone=timezone,
             now=now,
-            minimum_notice=mt.minimum_notice,
-            horizon_days=mt.horizon_days,
-            confirmed_bookings=bookings,
         )
         return SlotsResponse(slots=slots, timezone=timezone)
 
@@ -137,7 +124,13 @@ def create_public_router(
     ) -> BookingCreateResponse:
         host, meeting_type = resolve_host_and_meeting(session, username, event_slug)
         booking, management_token = create_booking(
-            session, host, meeting_type, request
+            session,
+            host,
+            meeting_type,
+            invitee_name=request.invitee_name,
+            invitee_email=str(request.invitee_email),
+            slot_start=request.slot_start,
+            notes=request.notes,
         )
         return BookingCreateResponse(
             id=booking.id,
