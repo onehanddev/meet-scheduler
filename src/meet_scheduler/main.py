@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from meet_scheduler.auth import create_auth_router
 from meet_scheduler.config import Settings, get_settings
 from meet_scheduler.database import create_session_factory, session_scope
+from meet_scheduler.profile import create_profile_router
 
 
 def create_app(
@@ -26,6 +27,7 @@ def create_app(
         yield from session_scope(active_factory)
 
     app.include_router(create_auth_router(get_session, resolve_settings))
+    app.include_router(create_profile_router(get_session, resolve_settings))
 
     @app.get("/healthz", tags=["health"])
     def healthz() -> dict[str, str]:

@@ -14,6 +14,8 @@ from sqlalchemy.orm import Session
 
 from meet_scheduler.config import Settings
 from meet_scheduler.models import Host, RefreshToken
+from meet_scheduler.schemas import HostProfileResponse
+from meet_scheduler.security import decode_token, get_host_id_from_access_token
 
 password_hasher = PasswordHasher()
 ACCESS_TOKEN_EXPIRES_IN_SECONDS = 15 * 60
@@ -30,9 +32,8 @@ class LoginRequest(BaseModel):
     password: str = Field(min_length=8, max_length=128)
 
 
-class HostResponse(BaseModel):
-    id: UUID
-    email: str
+class HostResponse(HostProfileResponse):
+    pass
 
 
 class CredentialsResponse(BaseModel):
@@ -65,25 +66,6 @@ def create_token(
         settings.token_secret,
         algorithm="HS256",
     )
-
-
-def _extract_bearer_token(authorization: str | None) -> str | None:
-    if not authorization:
-        return None
-    parts = authorization.split()
-    if len(parts) != 2 or parts[0].lower() != "bearer":
-        return None
-    return parts[1]
-
-
-def _decode_token(token: str, settings: Settings) -> dict:
-    try:
-        return jwt.decode(token, settings.token_secret, algorithms=["HS256"])
-    except jwt.InvalidTokenError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Could not validate credentials",
-        ) from exc
 
 
 def _persist_refresh_token(
@@ -123,25 +105,8 @@ def create_auth_router(
         session: Annotated[Session, Depends(get_session)],
         authorization: Annotated[str | None, Header()] = None,
     ) -> Host:
-        token = _extract_bearer_token(authorization)
-        if token is None:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Not authenticated",
-            )
-        payload = _decode_token(token, get_settings())
-        if payload.get("type") != "access":
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Could not validate credentials",
-            )
-        host_id = payload.get("sub")
-        if host_id is None:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Could not validate credentials",
-            )
-        host = session.get(Host, UUID(host_id))
+        host_id = get_host_id_from_access_token(authorization, get_settings())
+        host = session.get(Host, host_id)
         if host is None:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
@@ -228,7 +193,7 @@ def create_auth_router(
         session: Annotated[Session, Depends(get_session)],
     ) -> CredentialsResponse:
         settings = get_settings()
-        payload = _decode_token(request.refresh_token, settings)
+        payload = decode_token(request.refresh_token, settings)
         if payload.get("type") != "refresh":
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
@@ -288,7 +253,7 @@ def create_auth_router(
         session: Annotated[Session, Depends(get_session)],
     ) -> None:
         settings = get_settings()
-        payload = _decode_token(request.refresh_token, settings)
+        payload = decode_token(request.refresh_token, settings)
         if payload.get("type") != "refresh":
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
