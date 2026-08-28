@@ -1,11 +1,5 @@
-from uuid import UUID
+"""Re-export for backward compat."""
 
-from pydantic import BaseModel
+from meet_scheduler.hosts.schemas import HostProfileResponse
 
-
-class HostProfileResponse(BaseModel):
-    id: UUID
-    email: str
-    username: str | None = None
-    display_name: str | None = None
-    timezone: str | None = None
+__all__ = ["HostProfileResponse"]

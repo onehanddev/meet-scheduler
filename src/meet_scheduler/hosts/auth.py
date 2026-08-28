@@ -6,16 +6,17 @@ from uuid import UUID, uuid4
 import jwt
 from argon2 import PasswordHasher
 from argon2.exceptions import VerifyMismatchError
-from fastapi import APIRouter, Depends, Header, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from meet_scheduler.config import Settings
-from meet_scheduler.models import Host, RefreshToken
-from meet_scheduler.schemas import HostProfileResponse
-from meet_scheduler.security import decode_token, get_host_id_from_access_token
+from meet_scheduler.dependencies import create_current_host_dependency
+from meet_scheduler.hosts.models import Host, RefreshToken
+from meet_scheduler.hosts.schemas import HostProfileResponse
+from meet_scheduler.security import decode_token
 
 password_hasher = PasswordHasher()
 ACCESS_TOKEN_EXPIRES_IN_SECONDS = 15 * 60
@@ -100,19 +101,7 @@ def create_auth_router(
     get_settings: Callable[[], Settings],
 ) -> APIRouter:
     router = APIRouter(prefix="/auth", tags=["authentication"])
-
-    def get_current_host(
-        session: Annotated[Session, Depends(get_session)],
-        authorization: Annotated[str | None, Header()] = None,
-    ) -> Host:
-        host_id = get_host_id_from_access_token(authorization, get_settings())
-        host = session.get(Host, host_id)
-        if host is None:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Could not validate credentials",
-            )
-        return host
+    get_current_host = create_current_host_dependency(get_session, get_settings)
 
     @router.post(
         "/register",
