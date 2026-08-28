@@ -49,7 +49,11 @@ def test_login_rejects_wrong_password_without_revealing_account_existence(
     )
 
     assert response.status_code == 401
-    assert response.json() == {"detail": "Invalid email or password"}
+    assert response.json() == {
+        "code": "unauthenticated",
+        "message": "Invalid email or password",
+        "details": [],
+    }
 
 
 def test_login_rejects_unknown_email_with_the_same_invalid_credentials_response(
@@ -64,7 +68,11 @@ def test_login_rejects_unknown_email_with_the_same_invalid_credentials_response(
     )
 
     assert response.status_code == 401
-    assert response.json() == {"detail": "Invalid email or password"}
+    assert response.json() == {
+        "code": "unauthenticated",
+        "message": "Invalid email or password",
+        "details": [],
+    }
 
 
 def test_login_returns_jwts_with_expected_host_claims(client: TestClient) -> None:

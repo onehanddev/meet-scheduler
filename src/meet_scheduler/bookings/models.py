@@ -1,7 +1,8 @@
 from datetime import datetime
 from uuid import UUID, uuid4
 
-from sqlalchemy import DateTime, ForeignKey, Index, String, Text
+from sqlalchemy import DateTime, ForeignKey, Index, String, Text, func, text
+from sqlalchemy.dialects.postgresql import ExcludeConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from meet_scheduler.database import Base
@@ -36,6 +37,13 @@ class Booking(Base):
     )
 
     __table_args__ = (
+        ExcludeConstraint(
+            (host_id, "="),
+            (func.tstzrange(start_time, end_time, "[)"), "&&"),
+            name="ex_bookings_host_confirmed_overlap",
+            using="gist",
+            where=text("status = 'confirmed'"),
+        ),
         Index("ix_bookings_host_id", "host_id"),
         Index("ix_bookings_host_start", "host_id", "start_time"),
         Index("ix_bookings_host_status", "host_id", "status"),

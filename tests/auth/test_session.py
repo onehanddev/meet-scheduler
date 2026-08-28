@@ -38,7 +38,11 @@ def test_me_rejects_missing_access_token(client: TestClient) -> None:
     response = client.get("/auth/me")
 
     assert response.status_code == 401
-    assert response.json() == {"detail": "Not authenticated"}
+    assert response.json() == {
+        "code": "unauthenticated",
+        "message": "Not authenticated",
+        "details": [],
+    }
 
 
 def test_me_rejects_refresh_token_as_access_token(client: TestClient) -> None:

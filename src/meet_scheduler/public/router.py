@@ -7,16 +7,21 @@ Interface (external seam): 3 entry points
 """
 
 from collections.abc import Callable, Iterator
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from typing import Annotated
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
-from meet_scheduler.availability.provider import WeeklyAvailabilityProvider
+from meet_scheduler.bookings.service import create_booking
 from meet_scheduler.config import Settings
-from meet_scheduler.public.schemas import PublicMeetingResponse, SlotsResponse
+from meet_scheduler.public.schemas import (
+    BookingCreateRequest,
+    BookingCreateResponse,
+    PublicMeetingResponse,
+    SlotsResponse,
+)
 from meet_scheduler.public.service import resolve_host_and_meeting
 from meet_scheduler.slots import service as slots_service
 
@@ -78,27 +83,15 @@ def create_public_router(
         except Exception:
             return SlotsResponse(slots=[], timezone=timezone)
 
-        # Provider boundary — not direct DB query throughout slot code
-        provider = WeeklyAvailabilityProvider(session)
-        windows = provider.get_windows(host.id)
-
-        if not windows:
-            return SlotsResponse(slots=[], timezone=timezone)
-
         now = slots_service.get_now()
-        bookings = slots_service.fetch_confirmed_bookings(session, host.id)
-
-        slots = slots_service.generate_slots(
-            windows=windows,
-            host_timezone=host.timezone,
-            duration=mt.duration,
+        slots = slots_service.generate_host_slots(
+            session=session,
+            host=host,
+            meeting_type=mt,
             from_date=from_date,
             to_date=to_date,
             invitee_timezone=timezone,
             now=now,
-            minimum_notice=mt.minimum_notice,
-            horizon_days=mt.horizon_days,
-            confirmed_bookings=bookings,
         )
         return SlotsResponse(slots=slots, timezone=timezone)
 
@@ -118,16 +111,38 @@ def create_public_router(
             event_slug=mt.event_slug,
         )
 
-    @router.post("/{username}/{event_slug}/bookings", status_code=201)
+    @router.post(
+        "/{username}/{event_slug}/bookings",
+        response_model=BookingCreateResponse,
+        status_code=201,
+    )
     def create_booking_public(
         username: str,
         event_slug: str,
+        request: BookingCreateRequest,
         session: Annotated[Session, Depends(get_session)],
-    ) -> dict:
-        resolve_host_and_meeting(session, username, event_slug)
-        return {
-            "detail": "booking not yet implemented",
-            "management_token": "placeholder",
-        }
+    ) -> BookingCreateResponse:
+        host, meeting_type = resolve_host_and_meeting(session, username, event_slug)
+        booking, management_token = create_booking(
+            session,
+            host,
+            meeting_type,
+            username=username,
+            event_slug=event_slug,
+            invitee_name=request.invitee_name,
+            invitee_email=str(request.invitee_email),
+            slot_start=request.slot_start,
+            notes=request.notes,
+        )
+        return BookingCreateResponse(
+            id=booking.id,
+            status=booking.status,
+            invitee_name=booking.invitee_name,
+            invitee_email=booking.invitee_email,
+            notes=booking.notes,
+            slot_start=booking.start_time.astimezone(UTC),
+            slot_end=booking.end_time.astimezone(UTC),
+            management_token=management_token,
+        )
 
     return router

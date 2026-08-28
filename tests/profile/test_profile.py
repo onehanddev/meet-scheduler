@@ -112,7 +112,11 @@ def test_username_enforces_case_insensitive_uniqueness_409(client: TestClient) -
         json={"username": "Alice-Wonder"},
     )
     assert dup.status_code == 409
-    assert dup.json()["detail"] == "Username already taken"
+    assert dup.json() == {
+        "code": "conflict",
+        "message": "Username already taken",
+        "details": [],
+    }
 
 
 def test_can_change_username(client: TestClient) -> None:

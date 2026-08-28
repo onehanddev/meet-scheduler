@@ -11,7 +11,7 @@ from meet_scheduler.config import Settings
 from meet_scheduler.dependencies import create_current_host_dependency
 from meet_scheduler.hosts.models import Host
 from meet_scheduler.hosts.schemas import HostProfileResponse
-from meet_scheduler.hosts.service import validate_timezone, validate_username
+from meet_scheduler.hosts.service import lock_host, validate_timezone, validate_username
 
 
 class ProfileResponse(HostProfileResponse):
@@ -67,6 +67,7 @@ def create_profile_router(
         session: Annotated[Session, Depends(get_session)],
         current_host: Annotated[Host, Depends(get_current_host)],
     ) -> Host:
+        current_host = lock_host(session, current_host.id)
         # No fields provided? Allow no-op but return current
         if request.username is not None:
             normalized = request.username  # already validated and lowercased

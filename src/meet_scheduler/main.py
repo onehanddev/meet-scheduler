@@ -1,9 +1,12 @@
 from collections.abc import Iterator
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session, sessionmaker
 
 from meet_scheduler.availability.router import create_availability_router
+from meet_scheduler.bookings.service import BookingError
 from meet_scheduler.config import Settings, get_settings
 from meet_scheduler.database import create_session_factory, session_scope
 from meet_scheduler.hosts.auth import create_auth_router
@@ -18,6 +21,61 @@ def create_app(
     session_factory: sessionmaker[Session] | None = None,
 ) -> FastAPI:
     app = FastAPI(title="Meet Scheduler API")
+
+    @app.exception_handler(BookingError)
+    async def handle_booking_error(
+        request: Request, exc: BookingError  # noqa: ARG001
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={"code": exc.code, "message": exc.message, "details": []},
+        )
+
+    # PRD 171-172 requires a consistent {code, message, details} envelope.
+    # Intentionally global: auth/profile/meeting-type errors were migrated
+    # to this envelope (see tests/auth/test_*.py). BookingError is separate
+    # so booking-specific codes (slot_no_longer_available etc.) keep 409.
+    @app.exception_handler(HTTPException)
+    async def handle_http_error(
+        request: Request, exc: HTTPException  # noqa: ARG001
+    ) -> JSONResponse:
+        if isinstance(exc.detail, dict):
+            code = str(exc.detail.get("code", "request_error"))
+            message = str(exc.detail.get("message", "The request failed."))
+        else:
+            code = {
+                401: "unauthenticated",
+                403: "unauthorized",
+                404: "not_found",
+                409: "conflict",
+                422: "validation_error",
+            }.get(exc.status_code, "request_error")
+            message = str(exc.detail)
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={"code": code, "message": message, "details": []},
+            headers=exc.headers,
+        )
+
+    @app.exception_handler(RequestValidationError)
+    async def handle_validation_error(
+        request: Request, exc: RequestValidationError  # noqa: ARG001
+    ) -> JSONResponse:
+        details = [
+            {
+                "field": ".".join(str(part) for part in error["loc"]),
+                "message": error["msg"],
+            }
+            for error in exc.errors()
+        ]
+        return JSONResponse(
+            status_code=422,
+            content={
+                "code": "validation_error",
+                "message": "The request is invalid.",
+                "details": details,
+            },
+        )
 
     def resolve_settings() -> Settings:
         return settings or get_settings()

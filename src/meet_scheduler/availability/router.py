@@ -17,6 +17,7 @@ from meet_scheduler.availability.service import parse_time, validate_windows_no_
 from meet_scheduler.config import Settings
 from meet_scheduler.dependencies import create_current_host_dependency
 from meet_scheduler.hosts.models import Host
+from meet_scheduler.hosts.service import lock_host
 
 
 def create_availability_router(
@@ -86,6 +87,7 @@ def create_availability_router(
 
         # Atomic replace in one transaction
         try:
+            lock_host(session, current_host.id)
             session.execute(
                 delete(AvailabilityWindow).where(
                     AvailabilityWindow.host_id == current_host.id

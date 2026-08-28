@@ -5,6 +5,8 @@ from zoneinfo import ZoneInfo
 
 from sqlalchemy.orm import Session
 
+from meet_scheduler.availability.provider import WeeklyAvailabilityProvider
+
 
 def get_now() -> datetime:
     """Request-scoped clock. Patchable in tests via unittest.mock.patch."""
@@ -144,3 +146,27 @@ def fetch_confirmed_bookings(
         return [(r.start_time, r.end_time) for r in rows]
     except Exception:
         return []
+
+
+def generate_host_slots(
+    *,
+    session: Session,
+    host,
+    meeting_type,
+    from_date: date,
+    to_date: date,
+    invitee_timezone: str,
+    now: datetime,
+) -> list[dict]:
+    return generate_slots(
+        windows=WeeklyAvailabilityProvider(session).get_windows(host.id),
+        host_timezone=host.timezone,
+        duration=meeting_type.duration,
+        from_date=from_date,
+        to_date=to_date,
+        invitee_timezone=invitee_timezone,
+        now=now,
+        minimum_notice=meeting_type.minimum_notice,
+        horizon_days=meeting_type.horizon_days,
+        confirmed_bookings=fetch_confirmed_bookings(session, host.id),
+    )

@@ -65,7 +65,9 @@ def test_registration_rejects_an_existing_email_case_insensitively(
 
     assert duplicate_response.status_code == 409
     assert duplicate_response.json() == {
-        "detail": "An account with this email already exists"
+        "code": "conflict",
+        "message": "An account with this email already exists",
+        "details": [],
     }
 
 

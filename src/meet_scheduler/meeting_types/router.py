@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 from meet_scheduler.config import Settings
 from meet_scheduler.dependencies import create_current_host_dependency
 from meet_scheduler.hosts.models import Host
+from meet_scheduler.hosts.service import lock_host
 from meet_scheduler.meeting_types.models import MeetingType
 from meet_scheduler.meeting_types.schemas import (
     MeetingTypeCreateRequest,
@@ -52,6 +53,7 @@ def create_meeting_type_router(
         session: Annotated[Session, Depends(get_session)],
         current_host: Annotated[Host, Depends(get_current_host)],
     ) -> MeetingTypeResponse:
+        lock_host(session, current_host.id)
         if get_by_host(session, current_host.id) is not None:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
@@ -108,6 +110,7 @@ def create_meeting_type_router(
         session: Annotated[Session, Depends(get_session)],
         current_host: Annotated[Host, Depends(get_current_host)],
     ) -> MeetingTypeResponse:
+        lock_host(session, current_host.id)
         mt = session.get(MeetingType, meeting_type_id)
         if mt is None or mt.host_id != current_host.id:
             raise HTTPException(
@@ -145,6 +148,7 @@ def create_meeting_type_router(
         session: Annotated[Session, Depends(get_session)],
         current_host: Annotated[Host, Depends(get_current_host)],
     ) -> MeetingTypeResponse:
+        lock_host(session, current_host.id)
         mt = get_by_host(session, current_host.id)
         if mt is None:
             raise HTTPException(

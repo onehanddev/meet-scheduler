@@ -1,5 +1,11 @@
 import re
+from uuid import UUID
 from zoneinfo import ZoneInfo
+
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from meet_scheduler.hosts.models import Host
 
 RESERVED_USERNAMES = {
     "admin",
@@ -46,3 +52,22 @@ def validate_timezone(value: str) -> str:
     except Exception as exc:
         raise ValueError(f"Invalid IANA timezone: {stripped}") from exc
     return stripped
+
+
+def lock_host(session: Session, host_id: UUID, *, read_only: bool = False) -> Host:
+    # Booking path uses FOR KEY SHARE so concurrent bookings don't block
+    # each other but still block FOR UPDATE writers (availability/profile/mt).
+    # Config writers use plain FOR UPDATE (default).
+    if read_only:
+        return session.scalars(
+            select(Host)
+            .where(Host.id == host_id)
+            .with_for_update(key_share=True)
+            .execution_options(populate_existing=True)
+        ).one()
+    return session.scalars(
+        select(Host)
+        .where(Host.id == host_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    ).one()
