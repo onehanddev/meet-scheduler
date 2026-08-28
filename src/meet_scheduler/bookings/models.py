@@ -29,6 +29,9 @@ class Booking(Base):
     )
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="confirmed")
     management_token_hash: Mapped[str | None] = mapped_column(Text, nullable=True)
+    predecessor_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("bookings.id", ondelete="SET NULL"), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
     )
